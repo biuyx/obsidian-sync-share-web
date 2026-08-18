@@ -60,7 +60,17 @@ module.exports = (env, argv) => {
                     loader: "babel-loader",
                     exclude: /node_modules/,
                     options: {
-                        presets: [["@babel/preset-react", { runtime: "automatic" }]],
+                        presets: [
+                            ["@babel/preset-env", {
+                                targets: {
+                                    browsers: ["> 0.5%", "not dead", "iOS >= 11", "Chrome >= 60", "Android >= 6", "Safari >= 11"]
+                                },
+                                useBuiltIns: "usage",
+                                corejs: 3,
+                                modules: false
+                            }],
+                            ["@babel/preset-react", { runtime: "automatic" }]
+                        ],
                         //  "plugins": ["@babel/plugin-transform-regenerator"]
                     },
                 },
