@@ -1,4 +1,4 @@
-import getNoteContent from "@/services/share";
+import getNoteContent, { getFolderContent } from "@/services/share";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
@@ -192,6 +192,88 @@ function Outline({ outline }) {
 }
 
 
+// ===== 树形目录结构 =====
+function buildFileTree(paths) {
+    const root = { children: {} };
+    (paths || []).forEach(p => {
+        const parts = p.split("/");
+        let node = root;
+        parts.forEach((part, i) => {
+            const isFile = i === parts.length - 1;
+            if (!node.children[part]) {
+                node.children[part] = { name: part, path: parts.slice(0, i + 1).join("/"), isFile, children: {} };
+            }
+            node = node.children[part];
+        });
+    });
+    return root;
+}
+
+function FileTreeNode({ node, onOpenFile, contentUrl }) {
+    if (node.isFile) {
+        const isMd = node.path.endsWith(".md");
+        if (isMd) {
+            return (
+                <li>
+                    <a className="link link-primary" onClick={() => onOpenFile(node.path)}>
+                        📄 {node.name}
+                    </a>
+                </li>
+            );
+        }
+        return (
+            <li>
+                <a className="link" href={contentUrl(node.path)} target="_blank">
+                    📎 {node.name}
+                </a>
+            </li>
+        );
+    }
+    const dirs = Object.keys(node.children).filter(k => !node.children[k].isFile).sort();
+    const files = Object.keys(node.children).filter(k => node.children[k].isFile).sort();
+    return (
+        <li>
+            <details open>
+                <summary className="cursor-pointer font-medium">📁 {node.name}</summary>
+                <ul className="ml-4 border-l border-base-300 pl-2">
+                    {dirs.map(k => (
+                        <FileTreeNode key={k} node={node.children[k]} onOpenFile={onOpenFile} contentUrl={contentUrl} />
+                    ))}
+                    {files.map(k => (
+                        <FileTreeNode key={k} node={node.children[k]} onOpenFile={onOpenFile} contentUrl={contentUrl} />
+                    ))}
+                </ul>
+            </details>
+        </li>
+    );
+}
+
+// 将 [[维基链接]] 转换为可点击链接（仅当目标笔记在当前分享目录内）
+function transformWikilinks(content, fileList, shareBase) {
+    if (!content || !fileList || !Array.isArray(fileList)) {
+        return content;
+    }
+    const lookup = {};
+    fileList.forEach(f => {
+        if (f.path && f.path.endsWith(".md")) {
+            const base = f.path.split("/").pop().replace(/\.md$/, "");
+            if (!lookup[base]) {
+                lookup[base] = f.path;
+            }
+        }
+    });
+    return content.replace(/\[\[([^\]]+)\]\]/g, (match, raw) => {
+        const inner = raw.split("|")[0].trim();
+        const target = lookup[inner];
+        if (!target) {
+            return match;
+        }
+        // 分段编码路径, 保留斜杠(避免 %2F 被 Tomcat 拒绝)
+        const encPath = target.split("/").map(seg => encodeURIComponent(seg)).join("/");
+        return `[${raw.trim()}](${shareBase}?link=${encPath})`;
+    });
+}
+
 let loadMathing = false;
 
 export default function Share() {
@@ -211,18 +293,43 @@ export default function Share() {
 
     const isDark = theme == "dark";
 
-    // console.info(isDark);
-
-
+    // 文件夹分享模式: folderFiles === null 表示单篇笔记分享
+    const [folderFiles, setFolderFiles] = useState(null);
+    const [viewLink, setViewLink] = useState(link || null);
 
     useEffect(() => {
         (async () => {
-            const [title, content] = await getNoteContent(username, shareLinkId, link);
-            setNoteContent(content);
-            setTitle(title);
-            document.title = title;
+            const data = await getFolderContent(username, shareLinkId);
+            setFolderFiles(data);
+            if (data && data.title) {
+                document.title = data.title;
+            }
         })();
-    }, [username, shareLinkId, link]);
+    }, [username, shareLinkId]);
+
+    // 单篇笔记分享
+    useEffect(() => {
+        if (folderFiles !== null) return;
+        (async () => {
+            const [t, content] = await getNoteContent(username, shareLinkId, viewLink);
+            setNoteContent(content);
+            if (t) {
+                setTitle(t);
+                document.title = t;
+            }
+        })();
+    }, [username, shareLinkId, viewLink, folderFiles]);
+
+    // 文件夹分享: 查看具体某篇笔记
+    useEffect(() => {
+        if (folderFiles === null || !viewLink) return;
+        (async () => {
+            const [t, content] = await getNoteContent(username, shareLinkId, viewLink);
+            setNoteContent(content);
+            setTitle(t);
+            document.title = t;
+        })();
+    }, [username, shareLinkId, viewLink, folderFiles]);
 
     const linkTarget = (href, children, title) => {
         return "_blank";
@@ -237,14 +344,14 @@ export default function Share() {
 
     const transformLinkUri = (href, children, title) => {
         // console.info(href, children, title);
-        if (href.startsWith("http://") || href.startsWith("https://")) {
+        if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("/share/") || href.startsWith("/api/")) {
             return href;
         } else {
             // 如果是md 直接预览
             if (href.endsWith(".md")) {
                 return `/share/${username}/${shareLinkId}?link=${href}`;
             }
-            return `/api/share/${username}/${shareLinkId}?link=${href}`;
+            return `/api/share/content/${username}/${shareLinkId}?link=${href}`;
         }
     };
 
@@ -298,6 +405,7 @@ export default function Share() {
                 setTimeout(() => setOutline(outline), 0)
             }
         }
+        const renderContent = transformWikilinks(noteContent, folderFiles ? folderFiles.files : null, `/share/${username}/${shareLinkId}`);
         return <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath, remarkOutline]}
             rehypePlugins={[rehypeRaw, ...rehypePlugins]}
@@ -431,9 +539,9 @@ export default function Share() {
                 },
             }}
         >
-            {noteContent}
+            {renderContent}
         </ReactMarkdown>
-    }, [noteContent, isDark, rehypePlugins])
+    }, [noteContent, isDark, rehypePlugins, folderFiles])
 
 
     useEffect(() => {
@@ -448,8 +556,37 @@ export default function Share() {
     }, [noteContent]);
 
 
-    return (
+    if (folderFiles !== null) {
+        if (viewLink) {
+            return (
+                <div className={"mx-auto max-w-screen-md pt-6 px-2 min-h-screen scroll-pt-16"}>
+                    <button className="btn btn-sm btn-ghost mb-4" onClick={() => { setViewLink(null); setNoteContent(null); setTitle(""); document.title = "Folder Share"; }}>
+                        ← 返回文件夹
+                    </button>
+                    <Outline outline={outline}></Outline>
+                    <h1 className="text-4xl font-bold mb-4">{title}</h1>
+                    {markdown}
+                </div>
+            );
+        }
+        const folderTitle = folderFiles.title || "文件夹分享";
+        const tree = buildFileTree(folderFiles.files.map(f => f.path));
+        const contentUrl = (path) => `/api/share/content/${username}/${shareLinkId}?link=${path}`;
+        return (
+            <div className={"mx-auto max-w-screen-md pt-6 px-2 min-h-screen scroll-pt-16"}>
+                <h1 className="text-4xl font-bold mb-4">📁 {folderTitle}</h1>
+                <p className="text-base-content/60 text-sm mb-4">共 {folderFiles.files.length} 个文件（树形目录，点击 Markdown 笔记在线预览）</p>
+                <ul className="menu bg-base-200 rounded-box w-full">
+                    {Object.keys(tree.children).sort().map(k => (
+                        <FileTreeNode key={k} node={tree.children[k]} onOpenFile={setViewLink} contentUrl={contentUrl} />
+                    ))}
+                    {folderFiles.files.length === 0 && <li><span className="text-base-content/50">该文件夹为空</span></li>}
+                </ul>
+            </div>
+        );
+    }
 
+    return (
         <div className={"mx-auto max-w-screen-md pt-6 px-2 min-h-screen scroll-pt-16"}>
             <Outline outline={outline}></Outline>
             <h1 className="text-4xl font-bold mb-4">{title}</h1>
