@@ -55,11 +55,11 @@ module.exports = (env, argv) => {
                         fullySpecified: false,
                     },
                 },
+                // src 代码: 转译 + polyfill 注入
                 {
                     test: /\.jsx?$/,
                     loader: "babel-loader",
-                    // 转译 node_modules 以兼容旧微信内核/老浏览器 (跳过 .map/.min/core-js)
-                    exclude: [/node_modules[\\/].*\.map$/, /node_modules[\\/].*\.min\.js$/, /node_modules[\\/](webpack|core-js|regenerator-runtime)[\\/]/],
+                    exclude: /node_modules/,
                     options: {
                         presets: [
                             ["@babel/preset-env", {
@@ -68,6 +68,25 @@ module.exports = (env, argv) => {
                                 },
                                 useBuiltIns: "usage",
                                 corejs: 3,
+                                modules: false
+                            }],
+                            ["@babel/preset-react", { runtime: "automatic" }]
+                        ],
+                        //  "plugins": ["@babel/plugin-transform-regenerator"]
+                    },
+                },
+                // node_modules: 只转译语法, 不注入 polyfill (避免 ESM/CJS 冲突)
+                {
+                    test: /\.jsx?$/,
+                    loader: "babel-loader",
+                    include: /node_modules/,
+                    options: {
+                        presets: [
+                            ["@babel/preset-env", {
+                                targets: {
+                                    browsers: ["> 0.5%", "not dead", "iOS >= 11", "Chrome >= 60", "Android >= 6", "Safari >= 11"]
+                                },
+                                useBuiltIns: false,
                                 modules: false
                             }],
                             ["@babel/preset-react", { runtime: "automatic" }]

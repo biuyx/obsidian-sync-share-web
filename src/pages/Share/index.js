@@ -1,5 +1,5 @@
 import getNoteContent, { getFolderContent } from "@/services/share";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +41,39 @@ const Image = ({ src, alt }) => {
         );
     }
 };
+// Mermaid 图表渲染(懒加载)
+const MermaidDiagram = ({ code }) => {
+    const ref = useRef(null);
+    const [error, setError] = useState(null);
+    const theme = useUsedTheme();
+    const isDark = theme == "dark";
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const mermaid = (await import("mermaid")).default;
+                mermaid.initialize({ startOnLoad: false, theme: isDark ? "dark" : "default", securityLevel: "loose" });
+                if (!ref.current) return;
+                ref.current.innerHTML = "";
+                const id = "mermaid-" + Math.random().toString(36).slice(2, 10);
+                const { svg } = await mermaid.render(id, code);
+                if (!cancelled && ref.current) {
+                    ref.current.innerHTML = svg;
+                }
+            } catch (e) {
+                if (!cancelled) setError(e && e.message ? e.message : String(e));
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [code, isDark]);
+
+    if (error) {
+        return <pre className="text-error text-xs my-4 p-2 bg-base-200 rounded overflow-x-auto">图表渲染失败: {error}</pre>;
+    }
+    return <div ref={ref} className="my-4 overflow-x-auto" />;
+};
+
 function createTree(outlineOrigin) {
     const outline = [...outlineOrigin];
     const tree = [];
@@ -498,6 +531,11 @@ export default function Share() {
                 code({ node, inline, className, children, ...props }) {
                     // console.info(node, inline, className, children);
                     const match = /language-(\w+)/.exec(className || "");
+
+                    // Mermaid 图表
+                    if (!inline && match && match[1] === "mermaid") {
+                        return <MermaidDiagram code={String(children).replace(/\n$/, "")} />;
+                    }
 
                     // wrapLongLines
                     return !inline ? (
