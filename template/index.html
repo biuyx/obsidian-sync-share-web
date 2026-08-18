@@ -9,6 +9,32 @@
     <title>
         <%= htmlWebpackPlugin.options.title %>
     </title>
+    <script>
+        // 错误显示层: 任何 JS 错误/资源加载失败直接显示在屏幕上(排查白屏用)
+        (function () {
+            function showError(msg) {
+                try {
+                    var d = document.createElement("div");
+                    d.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#fff;color:#c00;padding:20px;font-size:13px;overflow:auto;white-space:pre-wrap;font-family:monospace;";
+                    d.textContent = "[Page Error] " + new Date().toLocaleString() + "\n" + msg;
+                    document.body.appendChild(d);
+                } catch (e) { }
+            }
+            window.addEventListener("error", function (e) {
+                showError("error: " + (e.message || e.type) + "\nfile: " + (e.filename || "") + ":" + (e.lineno || ""));
+            }, true);
+            window.addEventListener("unhandledrejection", function (e) {
+                var r = e.reason;
+                showError("unhandledrejection: " + (r && r.message ? r.message : String(r)));
+            });
+            document.addEventListener("error", function (e) {
+                var t = e.target;
+                if (t && (t.tagName === "SCRIPT" || t.tagName === "LINK")) {
+                    showError("resource load failed: " + (t.src || t.href));
+                }
+            }, true);
+        })();
+    </script>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon" />
     <style>
         @media (prefers-reduced-motion: no-preference) {

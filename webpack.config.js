@@ -58,7 +58,8 @@ module.exports = (env, argv) => {
                 {
                     test: /\.jsx?$/,
                     loader: "babel-loader",
-                    exclude: /node_modules/,
+                    // 转译 node_modules 以兼容旧微信内核/老浏览器 (跳过 .map/.min/core-js)
+                    exclude: [/node_modules[\\/].*\.map$/, /node_modules[\\/].*\.min\.js$/, /node_modules[\\/](webpack|core-js|regenerator-runtime)[\\/]/],
                     options: {
                         presets: [
                             ["@babel/preset-env", {
